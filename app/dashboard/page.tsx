@@ -88,6 +88,9 @@ export default function Dashboard() {
   const [selectedGame, setSelectedGame] = useState<Game | null>(null)
   const [comment, setComment] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
+  const [advice, setAdvice] = useState<string | null>(null)
+  const [adviceStale, setAdviceStale] = useState(false)
+  const [adviceLoading, setAdviceLoading] = useState(false)
 
   const fetchGames = useCallback(async () => {
     const res = await fetch('/api/games')
@@ -96,7 +99,25 @@ export default function Dashboard() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchGames() }, [fetchGames])
+  const fetchAdvice = useCallback(async () => {
+    const res = await fetch('/api/advice')
+    const data = await res.json()
+    if (data.advice) setAdvice(data.advice)
+    if (data.stale) setAdviceStale(true)
+  }, [])
+
+  const regenerateAdvice = async () => {
+    setAdviceLoading(true)
+    const res = await fetch('/api/advice', { method: 'POST' })
+    const data = await res.json()
+    if (data.advice) {
+      setAdvice(data.advice)
+      setAdviceStale(false)
+    }
+    setAdviceLoading(false)
+  }
+
+  useEffect(() => { fetchGames(); fetchAdvice() }, [fetchGames, fetchAdvice])
 
   const uploadFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files).filter(f => f.name.endsWith('.kif') || f.name.endsWith('.KIF'))
@@ -123,6 +144,7 @@ export default function Dashboard() {
     })
     const data = await res.json()
     setComment(data.comment ?? data.error ?? 'エラーが発生しました')
+    if (!data.cached) setAdviceStale(true)
     setAnalyzing(false)
   }
 
@@ -168,6 +190,70 @@ export default function Dashboard() {
             <div style={{ marginTop: 8, fontSize: 13, color: '#4ade80' }}>{uploadMsg}</div>
           )}
         </div>
+
+        {/* Advice Card */}
+        {advice ? (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.12) 0%, rgba(239,68,68,0.08) 100%)',
+            border: '1px solid rgba(245,158,11,0.25)',
+            borderRadius: 12,
+            padding: '20px 24px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b' }}>
+                次の一局これに気をつけて
+              </div>
+              <button
+                onClick={regenerateAdvice}
+                disabled={adviceLoading}
+                style={{
+                  background: adviceStale ? 'rgba(245,158,11,0.2)' : '#1e293b',
+                  border: `1px solid ${adviceStale ? 'rgba(245,158,11,0.4)' : '#334155'}`,
+                  borderRadius: 6,
+                  color: adviceStale ? '#f59e0b' : '#94a3b8',
+                  fontSize: 12,
+                  padding: '4px 10px',
+                  cursor: adviceLoading ? 'wait' : 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {adviceLoading ? '生成中...' : adviceStale ? '更新あり・再生成' : '再生成'}
+              </button>
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.8, color: '#e2e8f0', whiteSpace: 'pre-wrap' }}>
+              {advice}
+            </div>
+          </div>
+        ) : stats.total > 0 && (
+          <div style={{
+            background: '#0a0f1e',
+            border: '1px solid #1e293b',
+            borderRadius: 12,
+            padding: '20px 24px',
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 14, color: '#64748b', marginBottom: 12 }}>
+              AI分析済みの対局からアドバイスを生成できます
+            </div>
+            <button
+              onClick={regenerateAdvice}
+              disabled={adviceLoading}
+              style={{
+                background: 'rgba(245,158,11,0.15)',
+                border: '1px solid rgba(245,158,11,0.3)',
+                borderRadius: 8,
+                color: '#f59e0b',
+                fontSize: 14,
+                fontWeight: 600,
+                padding: '8px 20px',
+                cursor: adviceLoading ? 'wait' : 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              {adviceLoading ? '生成中...' : 'アドバイスを生成する'}
+            </button>
+          </div>
+        )}
 
         {/* Stats */}
         {stats.total > 0 && (

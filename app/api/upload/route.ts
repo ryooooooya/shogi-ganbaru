@@ -14,7 +14,8 @@ export async function POST(req: Request) {
   const errors: string[] = []
 
   for (const file of files) {
-    const text = await file.text()
+    const buf = await file.arrayBuffer()
+    const text = new TextDecoder('shift_jis').decode(buf)
     const record = parseKif(text)
     if (!record) { errors.push(`${file.name}: パース失敗`); continue }
 

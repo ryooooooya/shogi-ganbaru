@@ -6,20 +6,21 @@ import Anthropic from '@anthropic-ai/sdk'
 const anthropic = new Anthropic()
 
 export async function POST(req: Request) {
-  const { gameId } = await req.json()
-  if (!gameId) return NextResponse.json({ error: 'gameId が必要です' }, { status: 400 })
+  try {
+    const { gameId } = await req.json()
+    if (!gameId) return NextResponse.json({ error: 'gameId が必要です' }, { status: 400 })
 
-  // 既存の分析があれば返す
-  const { data: existing } = await supabase
-    .from('analyses').select('comment').eq('game_id', gameId).maybeSingle()
-  if (existing) return NextResponse.json({ comment: existing.comment, cached: true })
+    // 既存の分析があれば返す
+    const { data: existing } = await supabase
+      .from('analyses').select('comment').eq('game_id', gameId).maybeSingle()
+    if (existing) return NextResponse.json({ comment: existing.comment, cached: true })
 
-  // 棋譜取得
-  const { data: game } = await supabase
-    .from('games').select('kif_raw, my_side, opponent, result, total_moves').eq('id', gameId).single()
-  if (!game) return NextResponse.json({ error: '棋譜が見つかりません' }, { status: 404 })
+    // 棋譜取得
+    const { data: game } = await supabase
+      .from('games').select('kif_raw, my_side, opponent, result, total_moves').eq('id', gameId).single()
+    if (!game) return NextResponse.json({ error: '棋譜が見つかりません' }, { status: 404 })
 
-  const prompt = `あなたは将棋のコーチです。以下の棋譜を分析して、プレイヤーへのコーチングコメントを日本語で提供してください。
+    const prompt = `あなたは将棋のコーチです。以下の棋譜を分析して、プレイヤーへのコーチングコメントを日本語で提供してください。
 
 プレイヤー情報: ${game.my_side}番・${game.result}・${game.total_moves}手・相手: ${game.opponent}
 
@@ -35,16 +36,21 @@ export async function POST(req: Request) {
 ---棋譜---
 ${game.kif_raw}`
 
-  const message = await anthropic.messages.create({
-    model: 'claude-opus-4-6',
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }],
-  })
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      messages: [{ role: 'user', content: prompt }],
+    })
 
-  const comment = (message.content[0] as { text: string }).text
+    const comment = (message.content[0] as { text: string }).text
 
-  // 保存
-  await supabase.from('analyses').insert({ game_id: gameId, comment })
+    // 保存
+    await supabase.from('analyses').insert({ game_id: gameId, comment })
 
-  return NextResponse.json({ comment, cached: false })
+    return NextResponse.json({ comment, cached: false })
+  } catch (e) {
+    console.error('Analyze error:', e)
+    const message = e instanceof Error ? e.message : '不明なエラー'
+    return NextResponse.json({ error: `分析に失敗しました: ${message}` }, { status: 500 })
+  }
 }
