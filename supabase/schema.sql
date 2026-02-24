@@ -9,7 +9,9 @@ create table games (
   result       text,
   my_sentype   text,
   opp_sentype  text,
-  kif_raw      text
+  kif_raw      text,
+  evals        jsonb,
+  blunders     jsonb
 );
 
 -- AI分析結果テーブル

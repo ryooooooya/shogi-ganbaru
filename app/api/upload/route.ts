@@ -12,6 +12,7 @@ export async function POST(req: Request) {
 
   let saved = 0, skipped = 0
   const errors: string[] = []
+  const savedIds: string[] = []
 
   for (const file of files) {
     const buf = await file.arrayBuffer()
@@ -28,10 +29,10 @@ export async function POST(req: Request) {
 
     if (existing) { skipped++; continue }
 
-    const { error } = await supabase.from('games').insert(record)
+    const { data: inserted, error } = await supabase.from('games').insert(record).select('id').single()
     if (error) errors.push(`${file.name}: ${error.message}`)
-    else saved++
+    else { saved++; savedIds.push(inserted.id) }
   }
 
-  return NextResponse.json({ ok: true, saved, skipped, errors })
+  return NextResponse.json({ ok: true, saved, skipped, errors, savedIds })
 }

@@ -1,6 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+
+type EvalData = {
+  move_num: number
+  move: string
+  score: number
+  best_move_usi: string
+  best_move_ja: string
+}
+
+type Blunder = EvalData & { drop: number }
 
 type Game = {
   id: string
@@ -11,6 +21,8 @@ type Game = {
   result: '勝ち' | '負け' | '不明'
   my_sentype: string
   opp_sentype: string
+  evals: EvalData[] | null
+  blunders: Blunder[] | null
 }
 
 type Stats = {
@@ -79,6 +91,106 @@ function StatTable({ title, data }: { title: string; data: Record<string, { wins
   )
 }
 
+function EvalGraph({ evals, blunders }: { evals: EvalData[]; blunders: Blunder[] | null }) {
+  const W = 540, H = 200, PAD_X = 40, PAD_Y = 20
+  const chartW = W - PAD_X * 2
+  const chartH = H - PAD_Y * 2
+  const MAX_SCORE = 3000
+
+  const clamp = (v: number) => Math.max(-MAX_SCORE, Math.min(MAX_SCORE, v))
+  const toX = (i: number) => PAD_X + (i / Math.max(evals.length - 1, 1)) * chartW
+  const toY = (score: number) => PAD_Y + chartH / 2 - (clamp(score) / MAX_SCORE) * (chartH / 2)
+
+  const zeroY = toY(0)
+
+  // 塗りつぶし用パス（先手有利=青、後手有利=赤）
+  // 0基準線からの塗りつぶし
+  let positivePath = `M ${toX(0)} ${zeroY}`
+  let negativePath = `M ${toX(0)} ${zeroY}`
+
+  for (let i = 0; i < evals.length; i++) {
+    const x = toX(i)
+    const score = clamp(evals[i].score)
+    if (score >= 0) {
+      positivePath += ` L ${x} ${toY(score)}`
+    } else {
+      positivePath += ` L ${x} ${zeroY}`
+    }
+  }
+  positivePath += ` L ${toX(evals.length - 1)} ${zeroY} Z`
+
+  for (let i = 0; i < evals.length; i++) {
+    const x = toX(i)
+    const score = clamp(evals[i].score)
+    if (score <= 0) {
+      negativePath += ` L ${x} ${toY(score)}`
+    } else {
+      negativePath += ` L ${x} ${zeroY}`
+    }
+  }
+  negativePath += ` L ${toX(evals.length - 1)} ${zeroY} Z`
+
+  // ライン
+  let linePath = ''
+  for (let i = 0; i < evals.length; i++) {
+    const x = toX(i)
+    const y = toY(evals[i].score)
+    linePath += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`
+  }
+
+  // 敗着マーカー
+  const blunderSet = new Set((blunders ?? []).map(b => b.move_num))
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
+      <defs>
+        <linearGradient id="grad-pos" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.05" />
+        </linearGradient>
+        <linearGradient id="grad-neg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ef4444" stopOpacity="0.05" />
+          <stop offset="100%" stopColor="#ef4444" stopOpacity="0.4" />
+        </linearGradient>
+      </defs>
+
+      {/* 背景グリッド */}
+      {[-2000, -1000, 0, 1000, 2000].map(v => (
+        <g key={v}>
+          <line x1={PAD_X} y1={toY(v)} x2={W - PAD_X} y2={toY(v)}
+            stroke={v === 0 ? '#475569' : '#1e293b'} strokeWidth={v === 0 ? 1 : 0.5} />
+          <text x={PAD_X - 4} y={toY(v) + 4} textAnchor="end"
+            fill="#475569" fontSize="9">{v === 0 ? '0' : v > 0 ? `+${v / 1000}k` : `${v / 1000}k`}</text>
+        </g>
+      ))}
+
+      {/* 塗りつぶし */}
+      <path d={positivePath} fill="url(#grad-pos)" />
+      <path d={negativePath} fill="url(#grad-neg)" />
+
+      {/* ライン */}
+      <path d={linePath} fill="none" stroke="#94a3b8" strokeWidth="1.5" />
+
+      {/* 敗着マーカー */}
+      {evals.map((ev, i) =>
+        blunderSet.has(ev.move_num) ? (
+          <circle key={i} cx={toX(i)} cy={toY(ev.score)} r="4"
+            fill="#ef4444" stroke="#0f172a" strokeWidth="1.5" />
+        ) : null
+      )}
+
+      {/* X軸ラベル */}
+      {evals.length > 0 && (
+        <>
+          <text x={PAD_X} y={H - 4} fill="#475569" fontSize="9">1</text>
+          <text x={W - PAD_X} y={H - 4} textAnchor="end" fill="#475569" fontSize="9">{evals[evals.length - 1].move_num}</text>
+          <text x={W / 2} y={H - 4} textAnchor="middle" fill="#475569" fontSize="9">手数</text>
+        </>
+      )}
+    </svg>
+  )
+}
+
 export default function Dashboard() {
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
@@ -91,6 +203,8 @@ export default function Dashboard() {
   const [advice, setAdvice] = useState<string | null>(null)
   const [adviceStale, setAdviceStale] = useState(false)
   const [adviceLoading, setAdviceLoading] = useState(false)
+  const [pendingAnalysis, setPendingAnalysis] = useState<Set<string>>(new Set())
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchGames = useCallback(async () => {
     const res = await fetch('/api/games')
@@ -119,6 +233,31 @@ export default function Dashboard() {
 
   useEffect(() => { fetchGames(); fetchAdvice() }, [fetchGames, fetchAdvice])
 
+  // ポーリング: pendingAnalysis にIDがある間、5秒ごとにgamesを再取得
+  useEffect(() => {
+    if (pendingAnalysis.size === 0) {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      return
+    }
+
+    pollRef.current = setInterval(async () => {
+      const res = await fetch('/api/games')
+      const data = await res.json()
+      if (!Array.isArray(data)) return
+      setGames(data)
+
+      // 解析完了したIDをpendingから除外
+      const stillPending = new Set<string>()
+      for (const id of pendingAnalysis) {
+        const g = data.find((g: Game) => g.id === id)
+        if (g && !g.evals) stillPending.add(id)
+      }
+      if (stillPending.size < pendingAnalysis.size) setPendingAnalysis(stillPending)
+    }, 5000)
+
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [pendingAnalysis])
+
   const uploadFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files).filter(f => f.name.endsWith('.kif') || f.name.endsWith('.KIF'))
     if (arr.length === 0) { setUploadMsg('KIFファイルを選択してください'); return }
@@ -131,6 +270,18 @@ export default function Dashboard() {
     setUploadMsg(`${data.saved}局追加 / ${data.skipped}局スキップ${data.errors?.length ? ` / エラー${data.errors.length}件` : ''}`)
     setUploading(false)
     fetchGames()
+
+    // バックグラウンドでエンジン解析を開始
+    if (data.savedIds && data.savedIds.length > 0) {
+      setPendingAnalysis(new Set(data.savedIds))
+      for (const id of data.savedIds) {
+        fetch('/api/engine-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameId: id }),
+        }).catch(() => {})
+      }
+    }
   }
 
   const analyze = async (game: Game) => {
@@ -182,7 +333,7 @@ export default function Dashboard() {
         >
           <input id="kif-input" type="file" accept=".kif,.KIF" multiple style={{ display: 'none' }}
             onChange={e => e.target.files && uploadFiles(e.target.files)} />
-          <div style={{ fontSize: 32, marginBottom: 8 }}>♟</div>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>&#9823;</div>
           <div style={{ fontSize: 14, color: '#64748b' }}>
             {uploading ? '保存中...' : 'KIFファイルをドロップ or タップして選択'}
           </div>
@@ -309,9 +460,27 @@ export default function Dashboard() {
                   {game.result === '勝ち' ? '勝' : '負'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 14, color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
                     vs {game.opponent ?? '不明'}
-                    <span style={{ marginLeft: 8, fontSize: 12, color: '#475569' }}>{game.my_side}</span>
+                    <span style={{ marginLeft: 4, fontSize: 12, color: '#475569' }}>{game.my_side}</span>
+                    {game.evals && (
+                      <span style={{
+                        fontSize: 10, color: '#4ade80', background: 'rgba(74,222,128,0.1)',
+                        border: '1px solid rgba(74,222,128,0.2)', borderRadius: 4,
+                        padding: '1px 5px', lineHeight: '16px',
+                      }}>
+                        解析済
+                      </span>
+                    )}
+                    {pendingAnalysis.has(game.id) && !game.evals && (
+                      <span style={{
+                        fontSize: 10, color: '#f59e0b', background: 'rgba(245,158,11,0.1)',
+                        border: '1px solid rgba(245,158,11,0.2)', borderRadius: 4,
+                        padding: '1px 5px', lineHeight: '16px',
+                      }}>
+                        解析中...
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>
                     {game.my_sentype} / 相手: {game.opp_sentype} / {game.total_moves}手
@@ -348,7 +517,7 @@ export default function Dashboard() {
             onClick={e => e.stopPropagation()}
             style={{
               background: '#0f172a', border: '1px solid #1e293b', borderRadius: 16, padding: 24,
-              width: '100%', maxWidth: 600, maxHeight: '70vh', overflowY: 'auto',
+              width: '100%', maxWidth: 600, maxHeight: '80vh', overflowY: 'auto',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -356,8 +525,51 @@ export default function Dashboard() {
                 vs {selectedGame.opponent} — {selectedGame.result}
               </div>
               <button onClick={() => { setSelectedGame(null); setComment('') }}
-                style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 20, cursor: 'pointer' }}>×</button>
+                style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 20, cursor: 'pointer' }}>&#215;</button>
             </div>
+
+            {/* 評価値グラフ */}
+            {selectedGame.evals && selectedGame.evals.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8, letterSpacing: '0.05em' }}>評価値グラフ（先手視点）</div>
+                <div style={{ background: '#020817', borderRadius: 8, padding: '12px 8px', border: '1px solid #1e293b' }}>
+                  <EvalGraph evals={selectedGame.evals} blunders={selectedGame.blunders} />
+                </div>
+              </div>
+            )}
+
+            {/* 敗着セクション */}
+            {selectedGame.blunders && selectedGame.blunders.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8, letterSpacing: '0.05em' }}>敗着候補</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[...selectedGame.blunders]
+                    .sort((a, b) => b.drop - a.drop)
+                    .map((b, i) => (
+                    <div key={i} style={{
+                      background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)',
+                      borderRadius: 8, padding: '10px 14px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: '#ef4444' }}>
+                          {b.move_num}手目
+                        </span>
+                        <span style={{ fontSize: 14, color: '#e2e8f0' }}>{b.move}</span>
+                        <span style={{ fontSize: 12, color: '#f87171', marginLeft: 'auto' }}>
+                          -{b.drop}pt
+                        </span>
+                      </div>
+                      {b.best_move_ja && (
+                        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                          代替手: {b.best_move_ja}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {analyzing ? (
               <div style={{ color: '#64748b', fontSize: 14, textAlign: 'center', padding: '24px 0' }}>
                 AIコーチが棋譜を分析中...

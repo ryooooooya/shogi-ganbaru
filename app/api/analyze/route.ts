@@ -17,15 +17,27 @@ export async function POST(req: Request) {
 
     // 棋譜取得
     const { data: game } = await supabase
-      .from('games').select('kif_raw, my_side, opponent, result, total_moves').eq('id', gameId).single()
+      .from('games').select('kif_raw, my_side, opponent, result, total_moves, blunders').eq('id', gameId).single()
     if (!game) return NextResponse.json({ error: '棋譜が見つかりません' }, { status: 404 })
+
+    // 敗着情報をプロンプトに追加
+    let blunderInfo = ''
+    if (game.blunders && Array.isArray(game.blunders) && game.blunders.length > 0) {
+      const items = game.blunders.map((b: { move_num: number; move: string; drop: number; best_move_ja: string }) =>
+        `  - ${b.move_num}手目 ${b.move}（評価値 -${b.drop}pt 下落、代替手: ${b.best_move_ja || b.move}）`
+      ).join('\n')
+      blunderInfo = `\n\n【エンジン解析による敗着候補】\n${items}\nこれらの手について特に言及してください。`
+    }
 
     const prompt = `あなたは将棋のコーチです。以下の棋譜を分析して、プレイヤーへのコーチングコメントを日本語で提供してください。
 
-プレイヤー情報: ${game.my_side}番・${game.result}・${game.total_moves}手・相手: ${game.opponent}
+【重要】指導対象のプレイヤーは「${game.my_side}」側です。棋譜中の${game.my_side}の指し手がこのプレイヤーの手です。${game.my_side === '先手' ? '後手' : '先手'}（${game.opponent}）は対戦相手です。
+プレイヤーの${game.my_side}の指し手を中心に分析・アドバイスしてください。
+
+対局結果: ${game.result}（${game.total_moves}手）${blunderInfo}
 
 分析の観点:
-1. 序盤の駒組みの評価（右四間飛車の形として適切だったか）
+1. 序盤の駒組みの評価
 2. 仕掛けのタイミングや方向性
 3. 形勢が傾いたと思われるポイント
 4. 終盤の寄せ・受けの評価

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 export async function GET() {
   const { data, error } = await supabase
     .from('games')
-    .select('id, game_date, my_side, opponent, total_moves, result, my_sentype, opp_sentype')
+    .select('id, game_date, my_side, opponent, total_moves, result, my_sentype, opp_sentype, evals, blunders')
     .order('game_date', { ascending: false })
     .limit(200)
 
