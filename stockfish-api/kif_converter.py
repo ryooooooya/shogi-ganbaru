@@ -4,6 +4,12 @@ import shogi
 import shogi.KIF
 import io
 import re
+from typing import NamedTuple
+
+
+class KifMoves(NamedTuple):
+    usi_moves: list[str]
+    ja_moves: list[str]  # 元のKIF日本語表記
 
 
 # 全角→半角数字
@@ -20,37 +26,59 @@ _PIECE_USI = {
 }
 
 
-def kif_to_moves(kif_text: str) -> list[str]:
-    """KIF文字列からUSI指し手リストを返す。
+def _extract_ja_moves(kif_text: str) -> list[str]:
+    """KIFテキストから日本語指し手リストを抽出する。"""
+    ja: list[str] = []
+    for line in kif_text.split("\n"):
+        m = re.match(r"^\s*\d+\s+(.+?)\s+\(", line.strip())
+        if m:
+            move_str = m.group(1).strip()
+            if move_str in ("投了", "中断", "反則勝ち", "反則負け", "千日手", "持将棋"):
+                break
+            ja.append(move_str)
+    return ja
 
-    python-shogiのKIFパーサーで読み込み、各局面のmove_stackから
-    USI形式の指し手文字列を取得する。
-    """
+
+def kif_to_moves(kif_text: str) -> KifMoves:
+    """KIF文字列からUSI指し手リストと日本語指し手リストを返す。"""
+    ja_moves = _extract_ja_moves(kif_text)
+
+    # python-shogiのparse_strを試す
     try:
         game = shogi.KIF.Parser.parse_str(kif_text)
+        raw_moves = None
+        if isinstance(game, dict) and "moves" in game:
+            raw_moves = game["moves"]
+        elif isinstance(game, list) and len(game) > 0:
+            if isinstance(game[0], dict) and "moves" in game[0]:
+                raw_moves = game[0]["moves"]
+
+        if raw_moves:
+            moves: list[str] = []
+            board = shogi.Board()
+            for move in raw_moves:
+                if isinstance(move, str):
+                    if move in ("resign", "win", "abort"):
+                        break
+                    if len(move) <= 5 and move[0] in "123456789abcdefghi":
+                        board.push_usi(move)
+                        moves.append(move)
+                    else:
+                        break
+                else:
+                    try:
+                        board.push(move)
+                        moves.append(move.usi())
+                    except Exception:
+                        break
+            if moves:
+                return KifMoves(moves, ja_moves)
     except Exception:
-        # python-shogiで読めない場合はフォールバック
-        return _fallback_parse(kif_text)
+        pass
 
-    moves: list[str] = []
-    board = shogi.Board()
-    for move in game["moves"]:
-        if move == "resign" or move == "win" or move == "abort":
-            break
-        try:
-            # python-shogiのKIFパーサーは日本語指し手を返す場合がある
-            if isinstance(move, str) and len(move) <= 5 and move[0] in "123456789abcdefghi":
-                # すでにUSI形式
-                board.push_usi(move)
-                moves.append(move)
-            else:
-                # moveオブジェクトの場合
-                board.push(move)
-                moves.append(move.usi())
-        except Exception:
-            break
-
-    return moves
+    # フォールバック: 自前パーサー
+    usi_moves = _fallback_parse(kif_text)
+    return KifMoves(usi_moves, ja_moves)
 
 
 def _fallback_parse(kif_text: str) -> list[str]:

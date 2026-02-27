@@ -183,12 +183,12 @@ async def health():
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
-    moves = kif_to_moves(req.kif)
-    if not moves:
+    result = kif_to_moves(req.kif)
+    if not result.usi_moves:
         raise HTTPException(status_code=400, detail="KIFのパースに失敗しました")
 
     try:
-        evals = await _run_engine(moves)
+        evals = await _run_engine(result.usi_moves)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="エンジンがタイムアウトしました")
     except FileNotFoundError:
@@ -196,6 +196,12 @@ async def analyze(req: AnalyzeRequest):
             status_code=500,
             detail=f"エンジンが見つかりません: {ENGINE_PATH}",
         )
+
+    # 日本語指し手をevalsに反映
+    for ev in evals:
+        idx = ev["move_num"] - 1  # 0手目は開始局面
+        if 0 <= idx < len(result.ja_moves):
+            ev["move"] = result.ja_moves[idx]
 
     blunders = _find_blunders(evals)
 
