@@ -95,7 +95,10 @@ function EvalGraph({ evals, blunders }: { evals: EvalData[]; blunders: Blunder[]
   const W = 540, H = 200, PAD_X = 40, PAD_Y = 20
   const chartW = W - PAD_X * 2
   const chartH = H - PAD_Y * 2
-  const MAX_SCORE = 3000
+
+  // Y軸をデータに合わせて自動調整（最低200、上限3000）
+  const maxAbs = Math.max(200, ...evals.map(e => Math.abs(e.score)))
+  const MAX_SCORE = Math.min(3000, Math.ceil(maxAbs * 1.2 / 100) * 100) // 20%余白、100単位に切り上げ
 
   const clamp = (v: number) => Math.max(-MAX_SCORE, Math.min(MAX_SCORE, v))
   const toX = (i: number) => PAD_X + (i / Math.max(evals.length - 1, 1)) * chartW
@@ -137,6 +140,21 @@ function EvalGraph({ evals, blunders }: { evals: EvalData[]; blunders: Blunder[]
 
   const blunderSet = new Set((blunders ?? []).map(b => b.move_num))
 
+  // グリッド線: データ範囲に応じて適切な間隔を計算
+  const gridStep = MAX_SCORE <= 300 ? 100 : MAX_SCORE <= 600 ? 200 : MAX_SCORE <= 1500 ? 500 : 1000
+  const gridLines: number[] = [0]
+  for (let v = gridStep; v <= MAX_SCORE; v += gridStep) {
+    gridLines.push(v)
+    gridLines.push(-v)
+  }
+
+  const fmtScore = (v: number) => {
+    if (v === 0) return '0'
+    const abs = Math.abs(v)
+    const label = abs >= 1000 ? `${abs / 1000}k` : `${abs}`
+    return v > 0 ? `+${label}` : `-${label}`
+  }
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }}>
       <defs>
@@ -150,12 +168,12 @@ function EvalGraph({ evals, blunders }: { evals: EvalData[]; blunders: Blunder[]
         </linearGradient>
       </defs>
 
-      {[-2000, -1000, 0, 1000, 2000].map(v => (
+      {gridLines.map(v => (
         <g key={v}>
           <line x1={PAD_X} y1={toY(v)} x2={W - PAD_X} y2={toY(v)}
             stroke={v === 0 ? '#9ca3af' : '#e5e7eb'} strokeWidth={v === 0 ? 1 : 0.5} />
           <text x={PAD_X - 4} y={toY(v) + 4} textAnchor="end"
-            fill="#9ca3af" fontSize="9">{v === 0 ? '0' : v > 0 ? `+${v / 1000}k` : `${v / 1000}k`}</text>
+            fill="#9ca3af" fontSize="9">{fmtScore(v)}</text>
         </g>
       ))}
 
