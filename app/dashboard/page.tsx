@@ -286,6 +286,15 @@ export default function Dashboard() {
     setAnalyzing(false)
   }
 
+  const runEngineAnalysis = async (gameId: string) => {
+    setPendingAnalysis(prev => new Set(prev).add(gameId))
+    fetch('/api/engine-analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gameId }),
+    }).catch(() => {})
+  }
+
   const stats = calcStats(games)
 
   return (
@@ -475,6 +484,17 @@ export default function Dashboard() {
                 <div style={{ fontSize: 12, color: '#9ca3af', flexShrink: 0 }}>
                   {game.game_date ? new Date(game.game_date).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' }) : ''}
                 </div>
+                {!game.evals && !pendingAnalysis.has(game.id) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); runEngineAnalysis(game.id) }}
+                    style={{
+                      flexShrink: 0, background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.2)', borderRadius: 6,
+                      color: '#d97706', fontSize: 12, padding: '4px 10px', cursor: 'pointer',
+                    }}
+                  >
+                    形勢解析
+                  </button>
+                )}
                 <button
                   onClick={() => analyze(game)}
                   style={{
